@@ -51,6 +51,7 @@ jobs:
           fetch-depth: 1
 
       - name: Run Claude Code Review
+        id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -80,3 +81,9 @@ jobs:
             --max-turns ${{ inputs.max_turns }}
             --model ${{ inputs.model }}
             --allowedTools "Bash(gh pr diff:*),Bash(gh pr view:*),Read"
+
+      - name: Render execution to step summary
+        if: always() && steps.claude.outputs.execution_file != ''
+        uses: PitziLabs/shared-workflows/.github/actions/render-claude-summary@main
+        with:
+          execution_file: ${{ steps.claude.outputs.execution_file }}

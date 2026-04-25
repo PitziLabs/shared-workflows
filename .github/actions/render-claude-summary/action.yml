@@ -1,0 +1,158 @@
+# ============================================================================
+# Composite: Render Claude execution to step summary
+# ============================================================================
+# Parses the JSON message stream emitted by anthropics/claude-code-action
+# (steps.<id>.outputs.execution_file) and writes a turn-by-turn report to
+# $GITHUB_STEP_SUMMARY so the run is readable from the Summary tab.
+# ============================================================================
+
+name: Render Claude execution to step summary
+description: Parse the Claude Code SDK message stream JSON and render a turn-by-turn report to GITHUB_STEP_SUMMARY.
+
+inputs:
+  execution_file:
+    description: "Path to the JSON execution file emitted by anthropics/claude-code-action."
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Render
+      if: ${{ inputs.execution_file != '' }}
+      shell: bash
+      env:
+        EXECUTION_FILE: ${{ inputs.execution_file }}
+      run: |
+        python3 - <<'PYEOF'
+        import json, os, sys, html
+
+        path = os.environ.get("EXECUTION_FILE", "")
+        out = os.environ.get("GITHUB_STEP_SUMMARY", "")
+        if not path or not os.path.isfile(path) or not out:
+            sys.exit(0)
+
+        with open(path) as f:
+            raw = f.read().strip()
+        if not raw:
+            sys.exit(0)
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            data = [json.loads(line) for line in raw.splitlines() if line.strip()]
+
+        if isinstance(data, list):
+            msgs = data
+        elif isinstance(data, dict):
+            msgs = data.get("messages") or data.get("events") or []
+        else:
+            msgs = []
+
+        def trunc(s, n):
+            s = "" if s is None else str(s)
+            return s if len(s) <= n else s[:n] + f"\n…(+{len(s)-n} chars truncated)"
+
+        def pre(s, n=1500):
+            return f"<pre>{html.escape(trunc(s, n))}</pre>"
+
+        def render_block(b):
+            if not isinstance(b, dict):
+                return pre(str(b), 1500)
+            t = b.get("type")
+            if t == "text":
+                return trunc(b.get("text", ""), 4000)
+            if t == "thinking":
+                return f"<details><summary><em>thinking</em></summary>\n\n{pre(b.get('thinking',''), 4000)}\n\n</details>"
+            if t == "tool_use":
+                name = b.get("name", "?")
+                inp = b.get("input", {})
+                try:
+                    body = json.dumps(inp, indent=2, ensure_ascii=False)
+                except Exception:
+                    body = str(inp)
+                return f"<details><summary>🔧 <code>{html.escape(str(name))}</code></summary>\n\n{pre(body, 1500)}\n\n</details>"
+            if t == "tool_result":
+                c = b.get("content", "")
+                if isinstance(c, list):
+                    parts = []
+                    for x in c:
+                        if isinstance(x, dict) and x.get("type") == "text":
+                            parts.append(x.get("text", ""))
+                        elif isinstance(x, (dict, list)):
+                            parts.append(json.dumps(x))
+                        else:
+                            parts.append(str(x))
+                    c = "\n".join(parts)
+                is_err = b.get("is_error")
+                label = "❗ tool_result (error)" if is_err else "↩ tool_result"
+                return f"<details><summary>{label}</summary>\n\n{pre(c, 2000)}\n\n</details>"
+            return f"<em>(unhandled block type: {html.escape(str(t))})</em>"
+
+        lines = ["# Claude Code execution"]
+        turn = 0
+        saw_init = False
+        for m in msgs:
+            if not isinstance(m, dict):
+                continue
+            t = m.get("type")
+            if t == "system":
+                if m.get("subtype") == "init" and not saw_init:
+                    saw_init = True
+                    model = m.get("model", "?")
+                    tools = m.get("tools") or []
+                    cwd = m.get("cwd", "")
+                    parts = [f"- **Model:** `{model}`", f"- **Tools available:** {len(tools)}"]
+                    if cwd:
+                        parts.append(f"- **CWD:** `{cwd}`")
+                    lines.append("\n".join(parts))
+                continue
+            if t == "assistant":
+                turn += 1
+                msg = m.get("message") or {}
+                content = msg.get("content") or m.get("content") or []
+                if isinstance(content, str):
+                    content = [{"type": "text", "text": content}]
+                lines.append(f"## Turn {turn} — assistant")
+                for b in content:
+                    lines.append(render_block(b))
+                continue
+            if t == "user":
+                msg = m.get("message") or {}
+                content = msg.get("content") or m.get("content") or []
+                if isinstance(content, str):
+                    lines.append(f"<details><summary>📝 user prompt</summary>\n\n{pre(content, 6000)}\n\n</details>")
+                    continue
+                tool_results = [b for b in content if isinstance(b, dict) and b.get("type") == "tool_result"]
+                if tool_results:
+                    lines.append("### tool results")
+                    for b in tool_results:
+                        lines.append(render_block(b))
+                else:
+                    lines.append("<details><summary>📝 user message</summary>\n")
+                    for b in content:
+                        lines.append(render_block(b))
+                    lines.append("</details>")
+                continue
+            if t == "result":
+                lines.append("## Result")
+                bits = []
+                n = m.get("num_turns")
+                if n is not None:
+                    bits.append(f"- Turns: **{n}**")
+                d = m.get("duration_ms")
+                if d is not None:
+                    bits.append(f"- Duration: **{d} ms**")
+                cost = m.get("total_cost_usd") if m.get("total_cost_usd") is not None else m.get("cost_usd")
+                if cost is not None:
+                    bits.append(f"- Cost: **${cost}**")
+                if m.get("is_error"):
+                    bits.append("- ❌ ended in error")
+                sub = m.get("subtype")
+                if sub:
+                    bits.append(f"- Subtype: `{sub}`")
+                if bits:
+                    lines.append("\n".join(bits))
+                continue
+
+        with open(out, "a") as fh:
+            fh.write("\n\n".join(lines) + "\n")
+        PYEOF
