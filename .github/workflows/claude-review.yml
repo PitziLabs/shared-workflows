@@ -1,0 +1,82 @@
+# ============================================================================
+# Reusable: Claude Code Review
+# ============================================================================
+# Reusable workflow for automated PR review. Callers wire up the on:
+# pull_request trigger (with their own paths-ignore filter) and pass a
+# repo-specific review_prompt; this workflow handles the boilerplate
+# (PR context header, common rules, output format).
+#
+# Pinned to Haiku by default — review is mechanical pattern-matching.
+# ============================================================================
+
+name: Claude Code Review (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      review_prompt:
+        description: "Repo-specific focus block. Inserted between the PR-context header and the common rules."
+        type: string
+        required: true
+      model:
+        description: "Model to use for review"
+        type: string
+        default: "haiku"
+      max_turns:
+        description: "Max agent turns"
+        type: number
+        default: 15
+      allowed_bots:
+        description: "Value for the action's allowed_bots input (set to \"*\" to review bot-authored PRs)"
+        type: string
+        default: ""
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: true
+
+jobs:
+  claude-review:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code Review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: ${{ inputs.allowed_bots }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Review this pull request. The PR branch is already checked out.
+
+            ${{ inputs.review_prompt }}
+
+            Rules:
+            - Only comment on actual problems or meaningful improvements
+            - Do NOT comment on style, formatting, or naming preferences
+            - Do NOT give positive feedback or praise — just flag issues
+            - Do NOT propose inline fix code — describe the problem and why it
+              matters, not the solution. Fixes go through a separate commit.
+            - If nothing significant is wrong, say so in one sentence and move on
+
+            Output format:
+            - Read the full diff and any source files needed for context
+            - Collect ALL findings before producing any output
+            - Return a single consolidated review — do not post comments
+              incrementally as you discover issues
+          claude_args: |
+            --max-turns ${{ inputs.max_turns }}
+            --model ${{ inputs.model }}
+            --allowedTools "Bash(gh pr diff:*),Bash(gh pr view:*),Read"

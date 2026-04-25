@@ -1,0 +1,88 @@
+# ============================================================================
+# Reusable: Claude Code Responder
+# ============================================================================
+# Reusable workflow for the @claude interactive responder. Callers wire up
+# `on:` triggers (issue_comment, issues, pull_request*) and pass repo-specific
+# inputs; this workflow handles label-based model routing, the @claude mention
+# predicate, and the action invocation.
+#
+# Label routing: `model:opus`, `model:sonnet`, `model:haiku` on the issue or
+# PR override the caller-specified default_model. Apply the label to
+# re-trigger the workflow with the new model.
+# ============================================================================
+
+name: Claude Responder (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      default_model:
+        description: "Default model when no model:* label is present"
+        type: string
+        default: "sonnet"
+      max_turns:
+        description: "Max agent turns per invocation"
+        type: number
+        default: 25
+      allowed_tools:
+        description: "Value passed to --allowedTools (raw, including quotes)"
+        type: string
+        required: true
+      extra_args:
+        description: "Additional claude_args lines (e.g. --verbose, --output-format stream-json)"
+        type: string
+        default: ""
+      output_max_tokens:
+        description: "Per-turn output token cap (CLAUDE_CODE_MAX_OUTPUT_TOKENS)"
+        type: string
+        default: "64000"
+      allowed_bots:
+        description: "Value for the action's allowed_bots input"
+        type: string
+        default: "github-actions"
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: true
+
+jobs:
+  claude:
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude'))) ||
+      (github.event_name == 'pull_request' && (contains(github.event.pull_request.body, '@claude') || contains(github.event.pull_request.title, '@claude')))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@v1
+        env:
+          CLAUDE_CODE_MAX_OUTPUT_TOKENS: ${{ inputs.output_max_tokens }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: ${{ inputs.allowed_bots }}
+          claude_args: |
+            --max-turns ${{ inputs.max_turns }}
+            --model ${{
+              (contains(github.event.issue.labels.*.name, 'model:opus') ||
+               contains(github.event.pull_request.labels.*.name, 'model:opus')) && 'opus' ||
+              (contains(github.event.issue.labels.*.name, 'model:sonnet') ||
+               contains(github.event.pull_request.labels.*.name, 'model:sonnet')) && 'sonnet' ||
+              (contains(github.event.issue.labels.*.name, 'model:haiku') ||
+               contains(github.event.pull_request.labels.*.name, 'model:haiku')) && 'haiku' ||
+              inputs.default_model
+            }}
+            --allowedTools ${{ inputs.allowed_tools }}
+            ${{ inputs.extra_args }}
