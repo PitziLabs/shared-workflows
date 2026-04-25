@@ -1,0 +1,84 @@
+# ============================================================================
+# Reusable: ShellCheck
+# ============================================================================
+# Static analysis for bash scripts. Callers can pass an explicit `scripts`
+# input (newline-separated relative paths) or leave it empty for repo-wide
+# discovery via `find -name '*.sh'`.
+# ============================================================================
+
+name: ShellCheck (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      scripts:
+        description: "Newline-separated list of script paths to check. Empty means discover all .sh files."
+        type: string
+        default: ""
+      severity:
+        description: "ShellCheck --severity value"
+        type: string
+        default: "warning"
+
+jobs:
+  shellcheck:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Run ShellCheck
+        env:
+          SCRIPTS_INPUT: ${{ inputs.scripts }}
+          SEVERITY: ${{ inputs.severity }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          echo "ShellCheck version: $(shellcheck --version | head -2 | tail -1)"
+          echo ""
+
+          if [[ -n "$SCRIPTS_INPUT" ]]; then
+            mapfile -t SCRIPTS <<< "$SCRIPTS_INPUT"
+          else
+            mapfile -t SCRIPTS < <(find . -name '*.sh' -not -path './.git/*' | sort)
+          fi
+
+          # Drop blank entries that creep in from trailing newlines
+          FILTERED=()
+          for s in "${SCRIPTS[@]}"; do
+            [[ -n "$s" ]] && FILTERED+=("$s")
+          done
+          SCRIPTS=("${FILTERED[@]}")
+
+          if [[ "${#SCRIPTS[@]}" -eq 0 ]]; then
+            echo "No shell scripts found."
+            exit 0
+          fi
+
+          FAILED=0
+          for script in "${SCRIPTS[@]}"; do
+            if [[ -f "$script" ]]; then
+              echo "━━━ Checking $script ━━━"
+              if shellcheck --severity="$SEVERITY" --shell=bash "$script"; then
+                echo "✓ $script passed"
+              else
+                FAILED=1
+                echo "✗ $script has issues"
+              fi
+              echo ""
+            else
+              echo "⚠ $script not found (skipping)"
+            fi
+          done
+
+          if [[ "$FAILED" -eq 1 ]]; then
+            echo "::error::ShellCheck found issues in one or more scripts."
+            exit 1
+          fi
+
+          echo "All scripts passed ShellCheck."
