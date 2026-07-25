@@ -1,0 +1,88 @@
+# ============================================================================
+# Reusable: docs-check
+# ============================================================================
+# Resolves relative markdown links across a caller's git-tracked markdown and
+# fails on genuinely broken ones. Designed to serve as a REQUIRED status check
+# for docs-only PRs — the fleet's most common change class ships documentation,
+# and renames/removals silently break relative links (see lentago/.github#57).
+#
+# UNCONDITIONAL BY DESIGN. Callers must trigger this on `pull_request` with NO
+# `paths:` filter. A required check whose workflow never triggers is held
+# "Expected" forever and deadlocks every non-matching PR — the hard rule
+# recorded in fleet-ops/required-checks.json. For the same reason this job has
+# no `if: draft` skip: a required check must always report a conclusion.
+#
+# FALSE POSITIVES: the checker skips site-absolute router routes (`/library/`)
+# and links that escape the repo root (GitHub's `../../issues/N` nav
+# convention) by rule — the two classes that were 237 of 240 raw failures in
+# the #57 scan. Anything left is handled by the `ignore` input or a checked-in
+# `.docs-check-ignore` file.
+#
+# The link resolver lives in this repo at ci/check_docs_links.py (a single,
+# testable source — see ci/test_check_docs_links.py). This workflow checks the
+# caller out, checks this repo out alongside it at the same ref, and runs the
+# script against the caller's tree.
+# ============================================================================
+
+name: docs-check (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      ignore:
+        description: "Newline-separated globs matched against source-file path or link target. For per-repo false positives not covered by the built-in site-absolute / escapes-root rules."
+        type: string
+        default: ""
+      paths:
+        description: "Space-separated git pathspecs to scan. Default discovers all tracked *.md and *.markdown."
+        type: string
+        default: "*.md *.markdown"
+
+jobs:
+  docs-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      # This reusable's workflow_ref looks like
+      #   lentago/shared-workflows/.github/workflows/docs-check.yml@refs/heads/main
+      # Pull the resolver from the same ref the caller invoked, so a caller
+      # pinned to a tag gets the matching script rather than drifting to main.
+      - name: Resolve shared-workflows ref
+        id: swref
+        env:
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: echo "ref=${WORKFLOW_REF##*@}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout docs-check tooling
+        uses: actions/checkout@v6
+        with:
+          repository: lentago/shared-workflows
+          ref: ${{ steps.swref.outputs.ref }}
+          path: .docs-check-tooling
+          fetch-depth: 1
+
+      - name: Check relative markdown links
+        env:
+          IGNORE_INPUT: ${{ inputs.ignore }}
+          PATHS_INPUT: ${{ inputs.paths }}
+        run: |
+          set -euo pipefail
+
+          # Fan the newline-separated ignore input into repeated --ignore flags.
+          IGNORE_ARGS=()
+          while IFS= read -r pat; do
+            [[ -n "$pat" ]] && IGNORE_ARGS+=(--ignore "$pat")
+          done <<< "$IGNORE_INPUT"
+
+          # shellcheck disable=SC2086 # PATHS_INPUT is a deliberate space-split pathspec list
+          python3 .docs-check-tooling/ci/check_docs_links.py \
+            --root . \
+            --paths $PATHS_INPUT \
+            "${IGNORE_ARGS[@]}"

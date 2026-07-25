@@ -84,6 +84,53 @@ jobs:
         2. **Bar** — ...
 ```
 
+### `docs-check.yml`
+
+Resolves relative markdown links across a repo's git-tracked markdown and
+fails on genuinely broken ones — the fleet's most common change class ships
+documentation, and renames/removals silently break relative links.
+
+**Trigger it unconditionally — no `paths:` filter.** This workflow is built to
+serve as a *required* status check, and a required check whose workflow never
+triggers is held "Expected" forever and deadlocks every non-matching PR (the
+hard rule in `fleet-ops/required-checks.json`). Trigger on `pull_request`
+across the board; the checker is cheap and skips fast when no markdown changed.
+
+The checker skips two link classes by rule — the two that accounted for 237 of
+240 raw failures in the fleet-wide scan (lentago/.github#57):
+
+- **Site-absolute router routes** (`/library/`, `/guides/stormwater/`) —
+  resolved by an Astro/Starlight site router at build time, not the filesystem.
+- **Links that escape the repo root** (`../../issues/5`) — GitHub's
+  repo-relative navigation convention, which resolves on github.com and can
+  never point at a tracked file anyway.
+
+Anything left is handled by the `ignore` input (newline-separated globs matched
+against the source-file path or the link target) or a checked-in
+`.docs-check-ignore` file at the repo root (one glob per line, `#` comments).
+
+```yaml
+name: docs-check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    # No paths: filter — this is a required check and must always report.
+
+jobs:
+  docs-check:
+    uses: lentago/shared-workflows/.github/workflows/docs-check.yml@main
+    with:
+      # ignore: |                 # optional, per-repo false positives
+      #   */api-reference/*
+      #   CHANGELOG.md
+      # paths: "*.md *.markdown"   # optional, default shown
+```
+
+The link resolver lives at [`ci/check_docs_links.py`](ci/check_docs_links.py) —
+a single, testable source promoted from `lentago/.github`'s `ci/validate.py`.
+Run its test suite locally with `python3 ci/test_check_docs_links.py`.
+
 ### `shellcheck.yml`
 
 ShellCheck for bash scripts. Pass an explicit `scripts` list, or leave it
