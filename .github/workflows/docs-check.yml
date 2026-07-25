@@ -57,7 +57,18 @@ jobs:
       - name: Resolve shared-workflows ref
         id: swref
         env:
-          WORKFLOW_REF: ${{ github.workflow_ref }}
+          # MUST be job_workflow_ref, not workflow_ref. `github.workflow_ref` is the
+          # ENTRY workflow — for a caller in another repo that is
+          # `lentago/<caller>/.github/workflows/docs-check.yml@refs/pull/N/merge`,
+          # so stripping to the ref yields the CALLER's PR ref and the tooling
+          # checkout below then asks shared-workflows for a ref it does not have:
+          #   fatal: couldn't find remote ref refs/pull/N/merge
+          # `github.job_workflow_ref` is this reusable's own ref, which is what the
+          # tooling checkout needs. The distinction is invisible when the reusable is
+          # called from within shared-workflows itself (the caller's ref resolves
+          # fine there), so a self-referential test passes while every cross-repo
+          # caller fails — see the fleet-wide rollout in lentago/.github#57.
+          WORKFLOW_REF: ${{ github.job_workflow_ref }}
         run: echo "ref=${WORKFLOW_REF##*@}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout docs-check tooling
