@@ -1,0 +1,26 @@
+# ============================================================================
+# docs-check (self) — dogfood the reusable on this repo's own markdown
+# ============================================================================
+# Callers elsewhere reference `docs-check.yml@main`; this one uses the local
+# path ref so a PR is checked by the version *in that PR*, not by whatever is
+# on main. That is the point of dogfooding here — a change that breaks the
+# resolver fails its own PR.
+#
+# Separate file because `.github/workflows/docs-check.yml` in this repo is the
+# reusable definition itself, not a caller.
+#
+# This is also what makes shared-workflows mappable in
+# fleet-ops/required-checks.json: every other workflow here is a `workflow_call`
+# reusable, so until now nothing ran on this repo's own PRs and it was a
+# permanent exception with no context to require.
+# ============================================================================
+
+name: docs-check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  docs-check:
+    uses: ./.github/workflows/docs-check.yml
