@@ -20,7 +20,7 @@ One sentence is plenty; don't make a meal of it.
 
 ## What this repo is
 
-Three reusable GitHub Actions workflows that the Lentago Labs fleet calls via
+Reusable GitHub Actions workflows that the Lentago Labs fleet calls via
 `uses: lentago/shared-workflows/.github/workflows/<name>.yml@main`:
 
 | Workflow | Purpose | Callers (current) |
@@ -28,6 +28,13 @@ Three reusable GitHub Actions workflows that the Lentago Labs fleet calls via
 | `claude-responder.yml` | Interactive `@claude` mentions on issues/PRs; model routed by `model:opus|sonnet|haiku` label | every Lentago Labs repo |
 | `claude-review.yml` | Automated Haiku PR review with caller-supplied focus block | every Lentago Labs repo |
 | `shellcheck.yml` | ShellCheck on `.sh` files, explicit list or repo-wide auto-discovery | repos with bash (`firewalla-axiom-pipeline`, `drosera`, `kalmia`, `workstation-bootstrap`) |
+| `docs-check.yml` | Relative-markdown-link resolver; unconditional so it can be a required check | intended fleet-wide (adoption pending) |
+
+`docs-check.yml` runs the resolver in `ci/check_docs_links.py` (tested by
+`ci/test_check_docs_links.py`) against the caller's tree. It must be triggered
+with **no `paths:` filter** — it's designed as a required status check, and a
+required check that never triggers deadlocks non-matching PRs
+(`fleet-ops/required-checks.json`).
 
 ## Architecture / load-bearing knowledge
 
