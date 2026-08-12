@@ -8,16 +8,67 @@
 
 # shared-workflows
 
-Reusable GitHub Actions workflows for Lentago Labs repositories.
+This is the Lentago Labs fleet's reusable-CI hub: one repository of
+[`workflow_call`](https://docs.github.com/en/actions/using-workflows/reusing-workflows)
+definitions — an agentic `@claude` responder and reviewer, a docs-link checker,
+and ShellCheck — that every Lentago Labs repo calls *by reference* rather than
+copying into its own `.github/`. Because callers pin `@main`, a single merged PR
+here changes CI behavior across the whole fleet on each repo's next run. If you
+manage CI for more than a couple of repos, this is the "define the pipeline
+once, everyone inherits it" pattern working end to end — the enterprise rhyme is
+a central pipeline library.
 
 **Authorship:** The workflows and documentation in this repo are co-written with [Claude](https://claude.ai) (Anthropic). I direct the work and review the output; Claude writes the YAML. I'm an infrastructure operator, not a software engineer — please don't read this repo as a portfolio of coding ability.
 
+## 📚 Ask this codebase (DeepWiki)
+
+<a href="https://deepwiki.com/lentago/shared-workflows"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki" height="32"></a>
+
+> [DeepWiki](https://deepwiki.com/lentago/shared-workflows) maintains an AI-generated wiki over this
+> repository — architecture pages, diagrams, and a Q&A box grounded in the actual code. Every
+> public Lentago Labs repo is indexed ([deepwiki.com/lentago](https://deepwiki.com/lentago));
+> it is the fastest way to orient before reading source. It is AI-generated: trust it to orient
+> you, verify against the code before you act on it.
+
+**Good first questions:**
+
+- How does the `claude-responder.yml` workflow route between opus, sonnet, and haiku models, and who can trigger it?
+- What does `docs-check.yml` do differently from a simple link-checker, and why must callers omit the `paths:` filter?
+- Why is the Claude PR review in `claude-review.yml` advisory/non-blocking instead of a required status check?
+
+## 🧭 What this repo demonstrates
+
+Every row is a pattern you can lift into your own CI, with a link to where it
+actually runs here.
+
+| Pattern | How it shows up here |
+|---|---|
+| **Reusable workflows, called by reference not copy-paste** — fix or extend the pipeline in one place, every consumer inherits it on its next run | Each definition is `on: workflow_call`; callers write `uses: lentago/shared-workflows/.github/workflows/<name>.yml@main` ([claude-responder.yml](.github/workflows/claude-responder.yml)) |
+| **Agentic PR responder with label-gated model routing** — let an LLM act inside CI with human-controlled cost/capability tiers set by a label, not a per-repo hardcode | [`claude-responder.yml`](.github/workflows/claude-responder.yml) reads `model:opus` / `model:sonnet` / `model:haiku` off the issue or PR to pick `--model`, falling back to `default_model` |
+| **Advisory (non-blocking) automated review** — decouple "useful signal" automation from "merge gate" automation so a flaky AI call never stalls delivery | [`claude-review.yml`](.github/workflows/claude-review.yml) runs the review step `continue-on-error`, always exits `0`, and posts a soft-fail comment instead of reddening the check |
+| **A required check must be unconditional** — a required status check whose workflow never triggers is held "Expected" forever and deadlocks every non-matching PR | [`docs-check.yml`](.github/workflows/docs-check.yml) documents "no `paths:` filter"; `docs-check / docs-check` is the one required check on this repo's `main` today |
+| **Dogfood a reusable workflow on its own source** — catch a broken reusable in *its own* PR, not only in a downstream caller | [`docs-check-self.yml`](.github/workflows/docs-check-self.yml) calls `uses: ./.github/workflows/docs-check.yml` (local path, not `@main`) so a PR is checked by the version inside that PR |
+| **Ref-resolution correctness for cross-repo checkouts** — a reusable that checks out its own repo must use the caller's pinned ref, not the caller's | [`docs-check.yml`](.github/workflows/docs-check.yml) resolves `github.job_workflow_ref` (not `workflow_ref`); a self-referential test masked the bug for external callers until [#30](https://github.com/lentago/shared-workflows/pull/30) |
+| **One canonical policy source with declared, manually-audited mirrors** — govern org-wide conventions from one file while being explicit about where the text is duplicated and why | [`CLAUDE.md`](CLAUDE.md)'s "Fleet PR-workflow (canonical source)" section names its two mirrors and states the keep-in-sync obligation (manual discipline, not automation) |
+| **Backwards-compatible `workflow_call` contracts** — interface discipline for shared automation: a new *required* input breaks every caller silently | [`CLAUDE.md`](CLAUDE.md) conventions: add inputs as optional with sensible defaults, never required |
+
 ## Workflows
+
+These four definitions are the fleet's CI-as-code surface. Each block below is
+the exact caller YAML an operator copies into a consuming repo's
+`.github/workflows/` — the caller passes a thin `with:` block and the reusable
+workflow handles auth, context, output format, and the heavy lifting.
 
 ### `claude-responder.yml`
 
-Interactive `@claude` responder. Routes to opus/sonnet/haiku based on
-`model:opus` / `model:sonnet` / `model:haiku` labels on the issue or PR.
+Interactive `@claude` responder — the team-facing on-ramp to the agent fleet.
+It fires when the literal string `@claude` appears in a comment, review, or
+issue/PR body or title, and routes to opus/sonnet/haiku based on
+`model:opus` / `model:sonnet` / `model:haiku` labels on the issue or PR
+(re-apply the label to re-trigger with the new model). With no `model:*` label
+it uses the caller's `default_model` (default `sonnet`). For ops readers: this
+is a cost/capability dial an issue-triager controls with a label, so the
+expensive model is opt-in per thread rather than baked into every repo.
 
 ```yaml
 name: Claude Code
@@ -55,10 +106,13 @@ PR-context header, rules, and output-format scaffolding.
 
 The review is **advisory and non-blocking**: the review step runs
 `continue-on-error` and the job always exits `0`, so a transient API failure
-or turn-budget exhaustion never reds the check or blocks auto-merge — if the
-review can't complete, a neutral soft-fail comment is posted instead. Optional
-inputs: `model` (default `haiku`), `max_turns` (default `40`, set high enough
-that a normal review finishes before the cap), `allowed_bots` (default `"*"`).
+or turn-budget exhaustion never reds the check or blocks a merge — if the
+review can't complete, a neutral soft-fail comment is posted instead. This is
+the deliberate "useful signal, not a gate" split: it is *not* a required check,
+and you should not treat it as one. Optional inputs: `model` (default `haiku`),
+`max_turns` (default `40`, set high enough that a normal review finishes before
+the cap), `allowed_bots` (default `"*"`, so the fleet's own agent-opened PRs get
+reviewed too).
 
 ```yaml
 name: Claude Code Review
@@ -88,7 +142,10 @@ jobs:
 
 Resolves relative markdown links across a repo's git-tracked markdown and
 fails on genuinely broken ones — the fleet's most common change class ships
-documentation, and renames/removals silently break relative links.
+documentation, and renames/removals silently break relative links. It is more
+than a generic link-checker: it understands the fleet's two known
+false-positive classes (below) and resolves them by rule instead of flagging
+them.
 
 **Trigger it unconditionally — no `paths:` filter.** This workflow is built to
 serve as a *required* status check, and a required check whose workflow never
@@ -129,7 +186,10 @@ jobs:
 
 The link resolver lives at [`ci/check_docs_links.py`](ci/check_docs_links.py) —
 a single, testable source promoted from `lentago/.github`'s `ci/validate.py`.
-Run its test suite locally with `python3 ci/test_check_docs_links.py`.
+Run its test suite locally with `python3 ci/test_check_docs_links.py`. This repo
+also dogfoods the checker on its own markdown via
+[`docs-check-self.yml`](.github/workflows/docs-check-self.yml), which uses the
+local path ref so a PR is validated by the resolver *inside that PR*.
 
 ### `shellcheck.yml`
 
@@ -155,5 +215,60 @@ jobs:
 
 ## Versioning
 
-Callers reference `@main` for the floating tip. Tag stable versions
-(`v0.1.0`, `v1`) once contracts solidify and migrate callers to the tag.
+Callers reference `@main` for the floating tip — no version tags are shipped
+yet, so every caller currently floats on `main` and a breaking change here
+reaches them on their next run. Tag stable versions (`v0.1.0`, `v1`) once
+contracts solidify and migrate callers to the tag.
+
+## 🛠️ Make a change yourself
+
+This is a lab — the systems are real, the stakes are not. Pick a vector:
+
+**Invoke the fleet agent from any issue or PR.** This is the lowest-friction
+on-ramp — no code, just a comment. Write `@claude` in a comment, review, or the
+body/title of an issue or PR on any repo that wires up the responder, and the
+[`claude-responder.yml`](.github/workflows/claude-responder.yml) `if:` predicate
+fires the agent. Add a `model:opus`, `model:sonnet`, or `model:haiku` label to
+route which model answers (the label overrides the caller's `default_model`;
+re-apply it to re-trigger). Note on access: nothing in *this* workflow restricts
+invocation to org members — the literal-`@claude` predicate is all that gates
+it, so who can reach the agent is governed by the caller repo's own event and
+trigger permissions, not by a check here. **Proof this works:** the agentic
+layer is actively hardened — [#15 fix(claude-review): make the reviewer advisory
+and non-blocking](https://github.com/lentago/shared-workflows/pull/15) and
+[#10 fix(claude-review): default allowed_bots to "*" so fleet bot PRs get
+reviewed](https://github.com/lentago/shared-workflows/pull/10).
+
+**Ship a new reusable CI check to the whole fleet.** Add or edit a
+`workflow_call` definition under `.github/workflows/`, test it by pointing one
+caller repo's `uses:` at `@<branch-name>` for a single merge, then open a PR
+here. After it merges to `main`, every caller repo picks up the change on its
+next `@main`-pinned run — no per-repo redeploy, one PR changes CI everywhere.
+**Proof this works:** [#28 Add reusable docs-check workflow (relative markdown
+links)](https://github.com/lentago/shared-workflows/pull/28),
+[#29 Dogfood docs-check on this repo's own
+markdown](https://github.com/lentago/shared-workflows/pull/29), and
+[#30 docs-check: resolve the tooling ref from
+job_workflow_ref](https://github.com/lentago/shared-workflows/pull/30) — the
+last fixed a cross-repo-caller bug (`job_workflow_ref` vs `workflow_ref`) that a
+self-referential test had masked for every external caller.
+
+**Amend the fleet's canonical PR-workflow policy.** The
+[`CLAUDE.md`](CLAUDE.md) "Fleet PR-workflow (canonical source)" section is the
+single source of truth for the fleet's PR conventions. Editing it means
+propagating the same change to its two documented mirrors — `~/repos/CLAUDE.md`
+and the `review_prompt` block in `claude-review.yml` — in the same PR. That sync
+is a stated manual obligation, not automation, so the discipline is part of the
+change. **Proof this works:** [#11 docs: neutralize PR voice — drop the ##
+Origin section and Prompt-Origin
+trailer](https://github.com/lentago/shared-workflows/pull/11) and [#6 Re-anchor
+fleet PR-workflow as canonical here + add CI review
+checks](https://github.com/lentago/shared-workflows/pull/6), which folded the
+rules into `claude-review.yml`'s prompt as machine-checked review criteria.
+
+---
+
+> 🌱 **Lentago Labs** is a team learning lab — real systems, non-critical stakes, modern
+> operations patterns demonstrated in the open. Start at the
+> [org profile](https://github.com/lentago), and read this repo on
+> [DeepWiki](https://deepwiki.com/lentago/shared-workflows).
