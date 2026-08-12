@@ -216,7 +216,7 @@ Known enforced surfaces (extend this list when a new one ships):
 | Live surface | Owning repo / mechanism |
 |---|---|
 | Grafana Cloud dashboards | `drosera` — terraform workflow applies `dashboards/*.json` on **every merge to main** |
-| Route 53 / `lentago.dev` DNS | `site-lentago-dev` (née `lentagolabs-dev`) Terraform — never console-edit |
+| Route 53 / `lentago.dev` DNS | `solidago` Terraform (`modules/apex-domain` — zone + ACM cert; corrected 2026-08-12, was misattributed to `site-lentago-dev`, which carries no Terraform) — never console-edit |
 | GitHub repo settings & rulesets | `.github` meta-repo — `fleet-ops/fleet-apply.sh` |
 | Central Alloy config (LXC 105) | `drosera` — `alloy-gitops.timer` pulls `main` every 5 min |
 | Proxmox guests on `homelab-cluster` (VM/LXC existence & shape) — all except the bullpen runner pool | `kalmia` — `terraform` workflow applies `terraform/` on **every merge to main**, via the LAN self-hosted runner (LXC 115 `gha-runner`) |
@@ -286,5 +286,9 @@ following the then-precedent from the 2026-07-04 rebrand wave. The
 policy was reversed the same morning. Grandfathered debt from that era,
 now tracked: kalmia#63 (lunaria runtime), betula#89 (on-device clone
 path), drosera#169 (OIDC role / tfstate key / on-host paths),
-claytonia#65 (on-host bullpen names), solidago#142 (AWS `foundry-*`
-resources).
+claytonia#65 (on-host bullpen names). solidago's AWS `foundry-*` rename
+was *already complete* when solidago#142 was filed against it on
+2026-07-21 — that ticket was written from a stale fleet-inventory
+premise rather than from live state, and was closed as OBE on
+2026-07-25. Check live state before filing rename debt from inventory
+docs.
