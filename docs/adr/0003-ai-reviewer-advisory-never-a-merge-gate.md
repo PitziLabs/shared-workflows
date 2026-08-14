@@ -44,7 +44,7 @@ than fixing the underlying flakiness directly:
   neutral "advisory, non-blocking" PR comment instead of leaving a bare
   failure.
 
-The framing, per the PR body: "a flaky AI call must never stall delivery."
+The framing, recorded in the README's patterns table: "a flaky AI call never stalls delivery."
 A retry-with-backoff around the intermittent 0-byte response was
 considered and explicitly deferred — the soft-fail already keeps that case
 from blocking, and a retry would need the prompt hoisted to a job-level

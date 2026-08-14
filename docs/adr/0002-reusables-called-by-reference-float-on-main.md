@@ -24,8 +24,8 @@ consequence explicitly — "Treat `main` changes as if they were releases
 until tagged versions exist" — because a single merged PR here changes CI
 behavior across every caller on their next run, with no per-repo redeploy
 step. That instant, fleet-wide propagation is treated as the point of the
-repo, not an accepted side effect: the README frames "one merged PR here
-changes CI everywhere" as the demonstrated pattern (see
+repo, not an accepted side effect: the README frames "one PR changes CI
+everywhere" as the demonstrated pattern (see
 [#28](https://github.com/lentago/shared-workflows/pull/28)/[#29](https://github.com/lentago/shared-workflows/pull/29)/[#30](https://github.com/lentago/shared-workflows/pull/30)
 for a caller-facing example: a docs-check bug reached every caller on
 `main`, and the fix reached them the same way).
