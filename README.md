@@ -20,6 +20,8 @@ a central pipeline library.
 
 **Authorship:** The workflows and documentation in this repo are co-written with [Claude](https://claude.ai) (Anthropic). I direct the work and review the output; Claude writes the YAML. I'm an infrastructure operator, not a software engineer — please don't read this repo as a portfolio of coding ability.
 
+**Architecture decisions:** [`docs/adr/`](docs/adr/) records the reasoning behind this repo's structural choices — canonical policy placement, `@main` floating, the advisory review gate, backwards-compatible contracts.
+
 ## 📚 Ask this codebase (DeepWiki)
 
 <a href="https://deepwiki.com/lentago/shared-workflows"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki" height="32"></a>
