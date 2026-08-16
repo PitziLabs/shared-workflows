@@ -46,7 +46,7 @@ jobs:
 
     steps:
       - name: Checkout caller repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 1
 
@@ -72,7 +72,7 @@ jobs:
         run: echo "ref=${WORKFLOW_REF##*@}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout docs-check tooling
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           repository: lentago/shared-workflows
           ref: ${{ steps.swref.outputs.ref }}
