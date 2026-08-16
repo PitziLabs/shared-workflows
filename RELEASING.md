@@ -50,7 +50,23 @@ which records the decision to move from `@main` to immutable semver tags.
 
 1. Ensure `main` is in the state you want to release and the green-gate above
    is satisfied.
-2. Create the GitHub release from the
+2. **Bump this repo's own internal references to the version you are about to
+   cut, and merge that first.** The reusable workflows here call this repo's
+   composite action by its full external form
+   (`uses: lentago/shared-workflows/.github/actions/render-claude-summary@<ref>`)
+   rather than a relative `./` path — inside a reusable workflow, `./` resolves
+   against the *caller's* repo, not this one, so the pinned form is required.
+
+   The consequence is easy to miss: if those refs still say `@v1.0.0` when
+   `v1.1.0` is tagged, then the workflows *inside* v1.1.0 keep running the
+   v1.0.0 action, and a fix to the composite action ships to nobody even though
+   a new release went out. Bump them to the version being cut, merge, then tag
+   that commit — the refs resolve once the tag exists.
+
+   ```bash
+   grep -rn 'shared-workflows/.github/actions/.*@v' .github/   # all must be the new version
+   ```
+3. Create the GitHub release from the
    [GitHub UI](https://github.com/lentago/shared-workflows/releases/new) or
    via `gh`:
    ```bash
@@ -70,7 +86,7 @@ which records the decision to move from `@main` to immutable semver tags.
    EOF
    )"
    ```
-3. Do **not** create or move a floating `@vX` major tag. Immutable tags only —
+4. Do **not** create or move a floating `@vX` major tag. Immutable tags only —
    see [ADR-0005](docs/adr/0005-immutable-semver-tags-replace-main-consumption.md)
    for why.
 
