@@ -219,7 +219,7 @@ Known enforced surfaces (extend this list when a new one ships):
 | Route 53 / `lentago.dev` DNS | `solidago` Terraform (`modules/apex-domain` — zone + ACM cert; corrected 2026-08-12, was misattributed to `site-lentago-dev`, which carries no Terraform) — never console-edit |
 | GitHub repo settings & rulesets | `.github` meta-repo — `fleet-ops/fleet-apply.sh` |
 | Central Alloy config (LXC 105) | `drosera` — `alloy-gitops.timer` pulls `main` every 5 min |
-| Proxmox guests on `homelab-cluster` (VM/LXC existence & shape) — all except the bullpen runner pool | `kalmia` — `terraform` workflow applies `terraform/` on **every merge to main**, via the LAN self-hosted runner (LXC 115 `gha-runner`) |
+| Proxmox guests on `homelab-cluster` (VM/LXC existence & shape) — all except the bullpen runner pool — plus the cluster vzdump backup jobs (kalmia#30) | `kalmia` — `terraform` workflow applies `terraform/` on **every merge to main**, via the LAN self-hosted runner (LXC 115 `gha-runner`) |
 | Proxmox guests — the bullpen runner pool (LXC 110–112, 116–117 in the `claytonia` PVE pool) | `claytonia` — `terraform` workflow applies `terraform/` on **every merge to main**, via a second LAN self-hosted runner agent on LXC 115 `gha-runner` (adopted from kalmia 2026-07-07, claytonia#51/kalmia#37) |
 
 Rules:
