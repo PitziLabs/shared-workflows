@@ -12,15 +12,15 @@ This is the Lentago Labs fleet's reusable-CI hub: one repository of
 [`workflow_call`](https://docs.github.com/en/actions/using-workflows/reusing-workflows)
 definitions — an agentic `@claude` responder and reviewer, a docs-link checker,
 and ShellCheck — that every Lentago Labs repo calls *by reference* rather than
-copying into its own `.github/`. Because callers pin `@main`, a single merged PR
-here changes CI behavior across the whole fleet on each repo's next run. If you
-manage CI for more than a couple of repos, this is the "define the pipeline
-once, everyone inherits it" pattern working end to end — the enterprise rhyme is
-a central pipeline library.
+copying into its own `.github/`. Callers pin to an immutable semver tag
+(`@v1.0.0`); upgrading means a Dependabot-opened bump PR in the caller repo, not
+silent propagation. If you manage CI for more than a couple of repos, this is the
+"define the pipeline once, everyone inherits it" pattern working end to end —
+the enterprise rhyme is a central pipeline library.
 
 **Authorship:** The workflows and documentation in this repo are co-written with [Claude](https://claude.ai) (Anthropic). I direct the work and review the output; Claude writes the YAML. I'm an infrastructure operator, not a software engineer — please don't read this repo as a portfolio of coding ability.
 
-**Architecture decisions:** [`docs/adr/`](docs/adr/) records the reasoning behind this repo's structural choices — canonical policy placement, `@main` floating, the advisory review gate, backwards-compatible contracts.
+**Architecture decisions:** [`docs/adr/`](docs/adr/) records the reasoning behind this repo's structural choices — canonical policy placement, the `@main`→semver-tag migration, the advisory review gate, backwards-compatible contracts.
 
 ## 📚 Ask this codebase (DeepWiki)
 
@@ -45,7 +45,7 @@ actually runs here.
 
 | Pattern | How it shows up here |
 |---|---|
-| **Reusable workflows, called by reference not copy-paste** — fix or extend the pipeline in one place, every consumer inherits it on its next run | Each definition is `on: workflow_call`; callers write `uses: lentago/shared-workflows/.github/workflows/<name>.yml@main` ([claude-responder.yml](.github/workflows/claude-responder.yml)) |
+| **Reusable workflows, called by reference not copy-paste** — fix or extend the pipeline in one place, consumers upgrade via a Dependabot-opened bump PR | Each definition is `on: workflow_call`; callers write `uses: lentago/shared-workflows/.github/workflows/<name>.yml@v1.0.0` ([claude-responder.yml](.github/workflows/claude-responder.yml)) |
 | **Agentic PR responder with label-gated model routing** — let an LLM act inside CI with human-controlled cost/capability tiers set by a label, not a per-repo hardcode | [`claude-responder.yml`](.github/workflows/claude-responder.yml) reads `model:opus` / `model:sonnet` / `model:haiku` off the issue or PR to pick `--model`, falling back to `default_model` |
 | **Advisory (non-blocking) automated review** — decouple "useful signal" automation from "merge gate" automation so a flaky AI call never stalls delivery | [`claude-review.yml`](.github/workflows/claude-review.yml) runs the review step `continue-on-error`, always exits `0`, and posts a soft-fail comment instead of reddening the check |
 | **A required check must be unconditional** — a required status check whose workflow never triggers is held "Expected" forever and deadlocks every non-matching PR | [`docs-check.yml`](.github/workflows/docs-check.yml) documents "no `paths:` filter"; `docs-check / docs-check` is the one required check on this repo's `main` today |
@@ -89,7 +89,7 @@ on:
 
 jobs:
   claude:
-    uses: lentago/shared-workflows/.github/workflows/claude-responder.yml@main
+    uses: lentago/shared-workflows/.github/workflows/claude-responder.yml@v1.0.0
     secrets: inherit
     with:
       allowed_tools: '"Bash(git add:*)" "Bash(git commit:*)" "Read" "Edit" "Write"'
@@ -130,7 +130,7 @@ on:
 
 jobs:
   claude-review:
-    uses: lentago/shared-workflows/.github/workflows/claude-review.yml@main
+    uses: lentago/shared-workflows/.github/workflows/claude-review.yml@v1.0.0
     secrets: inherit
     with:
       review_prompt: |
@@ -178,7 +178,7 @@ on:
 
 jobs:
   docs-check:
-    uses: lentago/shared-workflows/.github/workflows/docs-check.yml@main
+    uses: lentago/shared-workflows/.github/workflows/docs-check.yml@v1.0.0
     with:
       # ignore: |                 # optional, per-repo false positives
       #   */api-reference/*
@@ -207,7 +207,7 @@ on:
 
 jobs:
   shellcheck:
-    uses: lentago/shared-workflows/.github/workflows/shellcheck.yml@main
+    uses: lentago/shared-workflows/.github/workflows/shellcheck.yml@v1.0.0
     with:
       scripts: |
         deploy.sh
@@ -217,10 +217,15 @@ jobs:
 
 ## Versioning
 
-Callers reference `@main` for the floating tip — no version tags are shipped
-yet, so every caller currently floats on `main` and a breaking change here
-reaches them on their next run. Tag stable versions (`v0.1.0`, `v1`) once
-contracts solidify and migrate callers to the tag.
+Callers pin to an **immutable semver tag** — `@v1.0.0`, `@v1.1.0`, etc.
+([ADR-0005](docs/adr/0005-immutable-semver-tags-replace-main-consumption.md)).
+A full release process — what must be green before tagging, the semver policy
+for reusable workflows (what counts as a breaking change vs. minor vs. patch),
+and how callers upgrade — is in [RELEASING.md](RELEASING.md).
+
+`@main` is not a supported consumption path. It continues to work mechanically
+but carries no stability guarantee; a merge here may change caller CI instantly
+and silently.
 
 ## 🛠️ Make a change yourself
 
@@ -244,9 +249,10 @@ reviewed](https://github.com/lentago/shared-workflows/pull/10).
 **Ship a new reusable CI check to the whole fleet.** Add or edit a
 `workflow_call` definition under `.github/workflows/`, test it by pointing one
 caller repo's `uses:` at `@<branch-name>` for a single merge, then open a PR
-here. After it merges to `main`, every caller repo picks up the change on its
-next `@main`-pinned run — no per-repo redeploy, one PR changes CI everywhere.
-**Proof this works:** [#28 Add reusable docs-check workflow (relative markdown
+here. After it merges to `main`, cut a release tag — caller repos pick up the
+change when they bump their `uses:` ref to the new tag (Dependabot opens those
+bumps as reviewable PRs where it is enabled). See [RELEASING.md](RELEASING.md).
+**Proof this works (historical, pre-versioning):** [#28 Add reusable docs-check workflow (relative markdown
 links)](https://github.com/lentago/shared-workflows/pull/28),
 [#29 Dogfood docs-check on this repo's own
 markdown](https://github.com/lentago/shared-workflows/pull/29), and

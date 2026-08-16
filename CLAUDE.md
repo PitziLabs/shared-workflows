@@ -14,14 +14,16 @@
 
 When Claude initializes in this directory, open the first response with a
 brief self-introduction as **Workflow Claude** — steward of the fleet's
-reusable GitHub Actions workflows (changes here propagate to every caller
-via `@main`, so version-pinning and breaking-change discipline matter).
+reusable GitHub Actions workflows (callers pin to immutable semver tags, so
+breaking-change discipline and the release process in RELEASING.md matter).
 One sentence is plenty; don't make a meal of it.
 
 ## What this repo is
 
 Reusable GitHub Actions workflows that the Lentago Labs fleet calls via
-`uses: lentago/shared-workflows/.github/workflows/<name>.yml@main`:
+`uses: lentago/shared-workflows/.github/workflows/<name>.yml@v1.0.0` (immutable
+semver tag — see [ADR-0005](docs/adr/0005-immutable-semver-tags-replace-main-consumption.md)
+and [RELEASING.md](RELEASING.md)):
 
 | Workflow | Purpose | Callers (current) |
 |---|---|---|
@@ -43,9 +45,9 @@ caller passes a thin `with:` block; the reusable workflow handles auth,
 context, output format, and the heavy lifting. Callers should **never**
 copy the workflow YAML into their own `.github/workflows/` — they `uses:` it.
 
-**Floating `@main` is the default.** Callers use `@main` for the tip. Once
-a workflow contract solidifies, tag a stable version (`v0.1.0`, `v1`) and
-migrate callers to the tag — this isn't done yet (no tags shipped).
+**Callers pin to immutable semver tags.** Callers use `@v1.0.0` (or the current
+release). `@main` is not a supported consumption path. See [RELEASING.md](RELEASING.md)
+for how to cut a release and how callers upgrade.
 
 **`secrets: inherit`** is required on the caller side — these workflows
 expect `ANTHROPIC_API_KEY` (and any model-routing PAT) to be in the org or
@@ -58,18 +60,21 @@ repo secrets store, passed through transparently.
   next caller run). Add inputs as optional with sensible defaults.
 - **Document new inputs in README.md.** This is the only documentation
   callers see — no separate site, no schema export.
-- **Test before publishing on `main`.** Push to a branch, point one repo's
-  workflow at `@<branch-name>` for one merge, then merge to `main`. Once
-  on `main`, every caller picks it up on their next workflow run.
+- **Test before merging to `main`.** Push to a branch, point one caller repo's
+  workflow at `@<branch-name>` for one merge, then merge to `main`. Only after
+  that, cut a release tag — callers pick up changes only once they bump to the
+  new tag. See [RELEASING.md](RELEASING.md) for what must be green before
+  tagging.
 
 ## Gotchas
 
 - **`paths-ignore` doesn't gate the reusable workflow itself.** The caller's
   `on:` block decides what triggers the workflow; once triggered, the
   reusable workflow always runs. Filter at the caller, not here.
-- **`@main` floats.** A breaking change in this repo's `main` will break
-  every caller's next run. Treat `main` changes as if they were releases
-  until tagged versions exist.
+- **`main` is not a release.** Callers pin to semver tags, not `@main`. A
+  change merged here is not live for callers until a new tag is cut and
+  callers bump their `uses:` ref. `@main` continues to work mechanically but
+  carries no stability guarantee.
 - **`workflow_call` jobs don't show up in `gh workflow run` lists** on
   caller repos — they appear as `Called by:` in the caller workflow's run
   page, not as standalone runs in this repo's Actions tab.

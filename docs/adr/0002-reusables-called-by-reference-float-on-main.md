@@ -1,6 +1,6 @@
 # ADR-0002: Reusable workflows are called by reference and float on `@main`; tags deferred
 
-**Status:** Accepted (2026-04-25; reconstructed 2026-08-13)
+**Status:** Superseded by [ADR-0005](0005-immutable-semver-tags-replace-main-consumption.md) (2026-08-16) · Originally accepted (2026-04-25; reconstructed 2026-08-13)
 
 ## Context
 

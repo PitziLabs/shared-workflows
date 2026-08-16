@@ -27,3 +27,4 @@ decision was made.
 | [0002](0002-reusables-called-by-reference-float-on-main.md) | Reusable workflows are called by reference and float on `@main`; tags deferred | 2026-04-25 |
 | [0003](0003-ai-reviewer-advisory-never-a-merge-gate.md) | The AI reviewer is advisory and never a merge gate | 2026-07-01 |
 | [0004](0004-backwards-compatible-contracts-and-self-dogfooding.md) | Backwards-compatible `workflow_call` contracts only, dogfooded via a local-path ref | 2026-05-26 (extended 2026-07-25) |
+| [0005](0005-immutable-semver-tags-replace-main-consumption.md) | Callers migrate from `@main` to immutable semver tags; `@main` no longer supported | 2026-08-16 |
