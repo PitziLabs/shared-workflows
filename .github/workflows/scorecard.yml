@@ -1,0 +1,61 @@
+# ============================================================================
+# OpenSSF Scorecard
+# ============================================================================
+# Runs the OSSF Scorecard supply-chain security analysis on a weekly schedule
+# and on every push to main. Results are uploaded to GitHub's code-scanning
+# dashboard (SARIF) and published to the Scorecard API so the badge reflects
+# live data.
+#
+# This workflow is not reusable — it runs directly in this repo to assess
+# shared-workflows' own security posture. A separate fleet-rollout effort
+# (lentago/.github#115) will propagate an equivalent workflow to every
+# Lentago Labs repo.
+# ============================================================================
+
+name: OpenSSF Scorecard
+
+on:
+  schedule:
+    # Weekly on Monday at 07:23 UTC — avoids GitHub Actions peak load windows.
+    - cron: "23 7 * * 1"
+  push:
+    branches: ["main"]
+
+permissions: read-all
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      # Required to upload SARIF results to the code-scanning dashboard.
+      security-events: write
+      # Required to publish results and generate the Scorecard badge.
+      id-token: write
+      contents: read
+      actions: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Run Scorecard analysis
+        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - name: Upload SARIF artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: SARIF file
+          path: results.sarif
+          retention-days: 5
+
+      - name: Upload to code-scanning dashboard
+        uses: github/codeql-action/upload-sarif@f3712979fa5f215279b101dd0a2e3bdfb4353324 # v3
+        with:
+          sarif_file: results.sarif
