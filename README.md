@@ -11,7 +11,7 @@
 This is the Lentago Labs fleet's reusable-CI hub: one repository of
 [`workflow_call`](https://docs.github.com/en/actions/using-workflows/reusing-workflows)
 definitions — an agentic `@claude` responder and reviewer, a docs-link checker,
-and ShellCheck — that every Lentago Labs repo calls *by reference* rather than
+ShellCheck, and a Terraform lint suite — that every Lentago Labs repo calls *by reference* rather than
 copying into its own `.github/`. Callers pin to an immutable semver tag
 (`@v1.0.0`); upgrading means a Dependabot-opened bump PR in the caller repo, not
 silent propagation. If you manage CI for more than a couple of repos, this is the
@@ -56,7 +56,7 @@ actually runs here.
 
 ## Workflows
 
-These four definitions are the fleet's CI-as-code surface. Each block below is
+These definitions are the fleet's CI-as-code surface. Each block below is
 the exact caller YAML an operator copies into a consuming repo's
 `.github/workflows/` — the caller passes a thin `with:` block and the reusable
 workflow handles auth, context, output format, and the heavy lifting.
@@ -214,6 +214,54 @@ jobs:
         scripts/start.sh
       # severity: warning  # optional, default "warning"
 ```
+
+### `tf-lint.yml`
+
+Terraform quality gate — runs four checks over a caller-specified directory:
+**`terraform fmt -check -recursive`** (formatting), **`terraform init
+-backend=false` + `terraform validate`** (config validity — no cloud
+credentials required, deliberately runnable on fork PRs), **tflint**
+(idiomatic Terraform and provider-specific rules), and **`trivy config`** (IaC
+misconfiguration scan; trivy is chosen for consistency with `site-deploy.yml`'s
+container scan, one tool across two surfaces).
+
+Each gate is individually toggleable via a boolean input. **Trigger it
+unconditionally — no `paths:` filter** if you intend to register it as a
+required status check. A required check whose workflow never triggers is held
+"Expected" forever and deadlocks every non-matching PR (the hard fleet rule).
+
+```yaml
+name: Terraform Lint
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+    # No paths: filter if this is a required check — see tf-lint.yml header.
+
+jobs:
+  tf-lint:
+    uses: lentago/shared-workflows/.github/workflows/tf-lint.yml@v1.2.0
+    with:
+      working_directory: terraform   # optional, default "terraform"
+      # terraform_version: "1.9.8"  # optional, default "latest"
+      # tflint_version: "v0.54.0"   # optional, default "latest"
+      # enable_fmt: false            # optional — disable if fmt is enforced elsewhere
+      # enable_validate: false       # optional
+      # enable_tflint: false         # optional
+      # enable_trivy: false          # optional
+```
+
+**Full input reference:**
+
+| Input | Required | Default | Description |
+|---|---|---|---|
+| `working_directory` | no | `terraform` | Directory containing Terraform configuration, relative to repo root |
+| `terraform_version` | no | `latest` | Terraform version to install (e.g. `1.9.8`) |
+| `tflint_version` | no | `latest` | tflint version to install (e.g. `v0.54.0`) |
+| `enable_fmt` | no | `true` | Run `terraform fmt -check -recursive` |
+| `enable_validate` | no | `true` | Run `terraform init -backend=false` + `terraform validate` |
+| `enable_tflint` | no | `true` | Run `tflint` |
+| `enable_trivy` | no | `true` | Run `trivy config` (IaC misconfiguration scan) |
 
 ### `site-deploy.yml`
 
