@@ -1,0 +1,200 @@
+# ============================================================================
+# Reusable: Astro site → ECR → ECS Fargate (site-deploy.yml)
+# ============================================================================
+# Builds an Astro static site, packages it into an nginx Docker image, pushes
+# to ECR (sha + latest tags), runs a Trivy vulnerability scan, attests the
+# image via actions/attest-build-provenance, then rolls the ECS service.
+#
+# SLSA Build L3 note: building inside a reusable workflow (rather than a
+# workflow defined in the caller's own repo) satisfies SLSA Build L3, because
+# the build definition is hosted in a repository the calling repo cannot
+# modify — eliminating the "hosted by the build requester" gap that caps
+# direct workflows at L2.
+#
+# Authenticates via OIDC; no long-lived AWS credentials required.
+#
+# Required caller permissions (workflow-level or job-level):
+#   id-token: write     — OIDC for AWS auth and attestation signing
+#   contents: read      — standard repository checkout
+#   attestations: write — store build provenance in GitHub's attestation store
+#   packages: read      — required by actions/attest-build-provenance
+#
+# Attestations are stored in GitHub's Sigstore-backed store (not pushed to
+# ECR). Verify after deployment:
+#   gh attestation verify oci://<registry>/<ecr_repo>@<digest> --owner lentago
+# ============================================================================
+
+name: Site Deploy (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      ecr_repo:
+        description: "ECR repository name (e.g. solidago-dev-lentago)"
+        type: string
+        required: true
+      ecs_cluster:
+        description: "ECS cluster name (e.g. solidago-dev-cluster)"
+        type: string
+        required: true
+      ecs_service:
+        description: "ECS service name (e.g. solidago-dev-lentago)"
+        type: string
+        required: true
+      role_arn:
+        description: "AWS IAM role ARN to assume via OIDC"
+        type: string
+        required: true
+      aws_region:
+        description: "AWS region"
+        type: string
+        default: "us-east-1"
+      node_version:
+        description: "Node.js version for the Astro build"
+        type: string
+        default: "20"
+      fetch_depth:
+        description: "Git fetch depth passed to actions/checkout (0 = full history; required for Starlight lastUpdated)"
+        type: number
+        default: 1
+      pre_build_command:
+        description: "Optional shell command to run after npm ci and before npm run build (e.g. a content-sync script)"
+        type: string
+        default: ""
+      build_env_vars:
+        description: "Newline-separated KEY=VALUE pairs exported as environment variables before npm run build"
+        type: string
+        default: ""
+      attest:
+        description: "Attest the pushed image with actions/attest-build-provenance (SLSA Build L3)"
+        type: boolean
+        default: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    concurrency:
+      group: deploy-main
+      cancel-in-progress: true
+
+    permissions:
+      id-token: write
+      contents: read
+      attestations: write
+      packages: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: ${{ inputs.fetch_depth }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Pre-build step
+        if: inputs.pre_build_command != ''
+        run: ${{ inputs.pre_build_command }}
+
+      - name: Set build environment variables
+        if: inputs.build_env_vars != ''
+        env:
+          BUILD_ENV_VARS: ${{ inputs.build_env_vars }}
+        run: |
+          while IFS= read -r line; do
+            [[ -z "$line" || "$line" == "#"* ]] && continue
+            printf '%s\n' "$line" >> "$GITHUB_ENV"
+          done <<< "$BUILD_ENV_VARS"
+
+      - name: Build static site
+        run: npm run build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ inputs.role_arn }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Login to ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
+
+      - name: Build and push container image
+        id: build-push
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          ECR_REPO: ${{ inputs.ecr_repo }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build \
+            -t "$REGISTRY/$ECR_REPO:latest" \
+            -t "$REGISTRY/$ECR_REPO:$IMAGE_TAG" \
+            .
+          docker push "$REGISTRY/$ECR_REPO:latest"
+          docker push "$REGISTRY/$ECR_REPO:$IMAGE_TAG"
+          echo "image=$REGISTRY/$ECR_REPO:$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Scan image for vulnerabilities (Trivy)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.build-push.outputs.image }}
+          format: table
+          exit-code: "0"
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      - name: Get image digest for attestation
+        id: digest
+        if: inputs.attest
+        env:
+          ECR_REPO: ${{ inputs.ecr_repo }}
+          IMAGE_TAG: ${{ github.sha }}
+          AWS_REGION: ${{ inputs.aws_region }}
+        run: |
+          DIGEST=$(aws ecr describe-images \
+            --repository-name "$ECR_REPO" \
+            --image-ids imageTag="$IMAGE_TAG" \
+            --region "$AWS_REGION" \
+            --query 'imageDetails[0].imageDigest' \
+            --output text \
+            --no-cli-pager)
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Attest build provenance
+        if: inputs.attest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ steps.ecr-login.outputs.registry }}/${{ inputs.ecr_repo }}
+          subject-digest: ${{ steps.digest.outputs.digest }}
+          push-to-registry: false
+
+      - name: Force new ECS deployment
+        env:
+          ECS_CLUSTER: ${{ inputs.ecs_cluster }}
+          ECS_SERVICE: ${{ inputs.ecs_service }}
+          AWS_REGION: ${{ inputs.aws_region }}
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_SERVICE" \
+            --force-new-deployment \
+            --region "$AWS_REGION" \
+            --no-cli-pager
+
+      - name: Wait for deployment to stabilize
+        env:
+          ECS_CLUSTER: ${{ inputs.ecs_cluster }}
+          ECS_SERVICE: ${{ inputs.ecs_service }}
+          AWS_REGION: ${{ inputs.aws_region }}
+        run: |
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE" \
+            --region "$AWS_REGION"
