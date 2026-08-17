@@ -31,6 +31,7 @@ and [RELEASING.md](RELEASING.md)):
 | `claude-review.yml` | Automated Haiku PR review with caller-supplied focus block | every Lentago Labs repo |
 | `shellcheck.yml` | ShellCheck on `.sh` files, explicit list or repo-wide auto-discovery | repos with bash (`firewalla-axiom-pipeline`, `drosera`, `kalmia`, `workstation-bootstrap`) |
 | `docs-check.yml` | Relative-markdown-link resolver; unconditional so it can be a required check | intended fleet-wide (adoption pending) |
+| `tf-lint.yml` | Terraform quality gates: fmt, validate (no-backend), tflint, trivy config; per-gate toggles | `solidago`, `kalmia`, `claytonia`, `drosera`, `.github` (adoption pending) |
 | `site-deploy.yml` | Astro site → ECR → ECS Fargate; includes Trivy scan + SLSA L3 attestation; callers migrate one at a time | `site-lentago-dev`, `site-icecreamtofightwith-com`, `site-pondviewlane-com` (pending migration) |
 
 `docs-check.yml` runs the resolver in `ci/check_docs_links.py` (tested by
