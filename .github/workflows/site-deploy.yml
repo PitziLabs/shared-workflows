@@ -74,9 +74,12 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
 
-    concurrency:
-      group: deploy-main
-      cancel-in-progress: true
+    # NO job-level concurrency here — deliberately. Concurrency policy belongs
+    # to the CALLER (all three site repos hold a workflow-level `deploy-main`
+    # group). A group declared here deadlocks against it: the caller's workflow
+    # takes the lock, this called job then waits on the same name, and GitHub
+    # cancels the pair ("deadlock detected for concurrency group"). Proven live
+    # on the first v1.1.0 deploy (site-lentago-dev run 32057853117).
 
     permissions:
       id-token: write
