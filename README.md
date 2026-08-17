@@ -215,6 +215,103 @@ jobs:
       # severity: warning  # optional, default "warning"
 ```
 
+### `site-deploy.yml`
+
+Reusable Astro-site deployment pipeline: builds the static site, packages
+it into a Docker image, pushes to ECR (`:latest` and `:<sha>` tags), scans
+for vulnerabilities with Trivy, attests the image with
+`actions/attest-build-provenance`, then rolls the ECS service and waits for
+stabilization. Authenticates via OIDC — no long-lived AWS credentials.
+
+**SLSA Build L3:** building inside a reusable workflow (hosted in a separate
+repository that callers cannot modify) satisfies SLSA Build L3. Attestations
+are stored in GitHub's Sigstore-backed store and can be verified offline:
+
+```bash
+gh attestation verify oci://<registry>/<ecr_repo>@<digest> --owner lentago
+```
+
+**Caller permissions required** (on the calling workflow's `job:` block):
+
+```yaml
+permissions:
+  id-token: write      # OIDC for AWS auth and attestation signing
+  contents: read
+  attestations: write  # write to GitHub's attestation store
+  packages: read       # required by actions/attest-build-provenance
+```
+
+The caller wires up `secrets: inherit` so the OIDC token and any other
+org/repo secrets are forwarded transparently.
+
+**Minimum caller example** (pin to the release that introduced this workflow):
+
+```yaml
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    uses: lentago/shared-workflows/.github/workflows/site-deploy.yml@v1.1.0
+    secrets: inherit
+    permissions:
+      id-token: write
+      contents: read
+      attestations: write
+      packages: read
+    with:
+      ecr_repo: solidago-dev-mysite
+      ecs_cluster: solidago-dev-cluster
+      ecs_service: solidago-dev-mysite
+      role_arn: arn:aws:iam::365184644049:role/solidago-dev-github-actions
+```
+
+**Full input reference:**
+
+| Input | Required | Default | Description |
+|---|---|---|---|
+| `ecr_repo` | yes | — | ECR repository name |
+| `ecs_cluster` | yes | — | ECS cluster name |
+| `ecs_service` | yes | — | ECS service name |
+| `role_arn` | yes | — | IAM role ARN to assume via OIDC |
+| `aws_region` | no | `us-east-1` | AWS region |
+| `node_version` | no | `20` | Node.js version for the Astro build |
+| `fetch_depth` | no | `1` | Git fetch depth (`0` = full history; required for Starlight `lastUpdated`) |
+| `pre_build_command` | no | `""` | Shell command run after `npm ci` and before `npm run build` (e.g. a Python content-sync script) |
+| `build_env_vars` | no | `""` | Newline-separated `KEY=VALUE` pairs exported as env vars for the build step (e.g. `PUBLIC_ASK_ENDPOINT=${{ vars.PUBLIC_ASK_ENDPOINT }}`) |
+| `attest` | no | `true` | Attest the pushed image with `actions/attest-build-provenance` |
+
+**Site-specific examples:**
+
+```yaml
+# site-icecreamtofightwith-com: Python content sync before build
+with:
+  ecr_repo: solidago-dev-app
+  ecs_cluster: solidago-dev-cluster
+  ecs_service: solidago-dev-app
+  role_arn: arn:aws:iam::365184644049:role/solidago-dev-github-actions
+  pre_build_command: python3 sync_recipes.py
+
+# site-pondviewlane-com: full git history for Starlight lastUpdated + build env var
+with:
+  ecr_repo: solidago-dev-pondview
+  ecs_cluster: solidago-dev-cluster
+  ecs_service: solidago-dev-pondview
+  role_arn: arn:aws:iam::365184644049:role/solidago-dev-github-actions
+  node_version: "24"
+  fetch_depth: 0
+  build_env_vars: "PUBLIC_ASK_ENDPOINT=${{ vars.PUBLIC_ASK_ENDPOINT }}"
+```
+
+**Trivy scan** runs informational-only (`exit-code: 0`) — it reports
+CRITICAL/HIGH unfixed findings in the job log but never blocks the deploy.
+This gives visibility without introducing a new breakage vector on an
+existing fleet of live sites.
+
 ## Versioning
 
 Callers pin to an **immutable semver tag** — `@v1.0.0`, `@v1.1.0`, etc.
